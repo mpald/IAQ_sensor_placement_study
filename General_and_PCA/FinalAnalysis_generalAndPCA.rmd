@@ -1,0 +1,1095 @@
+---
+title: "Analysis - general and PCA"
+author: "Marina Paldauf"
+date: "20/05/2021"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 2
+    float_toc: yes
+    urlcolour: blue
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(RMySQL)
+library(reshape2)
+library(GGally)
+library(dplyr)
+library(ggplot2)
+library(ggcorrplot)
+library(cowplot)
+library(corrplot)
+library(devtools)
+library(ggbiplot)
+library(purrr)
+library(viridis)
+library(lubridate)
+library(gridExtra)
+library("FactoMineR")
+library("factoextra")
+library(normalr)
+library(rgl)
+library(rstatix)
+library(readr)
+library(forecast)
+library(fpp2)
+library(TTR)
+```
+
+## Getting Data Markova
+
+Data access - Relevant data saved in the form of the file for privacy reasons, preventing sharing direct access to the database. 
+
+Data set includes data form two sensors located at the Mrakova Farm near Bled, Slovenia. Sensor 1 is located in the 1st floor, and sensor 2 is located in the ground floor. Data set includes dates from 24.6.2020 until 31.12.2020. Both of them are hanging in the air attached to a string. Prediction is done on the dataset between 14.8.2020 and 31.12.2020, due to a large chunk of missing data in July 2020.
+
+
+```{r data, warning=FALSE}
+d.mrakova.main <- read.csv("sensor_data_2020.csv")
+
+d.mrakova.main.predict <- d.mrakova.main %>% 
+  mutate(date = as.Date(created_at, "%Y-%m-%d %H:%M:%S")) %>%
+  filter(date <= as.Date("2020-12-31 23:59:59") | date <= as.Date("2020-08-14 00:00:00"))
+
+```
+
+Glossary of variable names:
+
+```{r glossary, echo=FALSE, warning=FALSE}
+column.names <- colnames(d.mrakova.main , do.NULL = TRUE, prefix = "col")
+
+
+glossary <- cbind(column.names,c("X","sensor.calss.1", "sensor.class.2", "???", "IP", "received.signal.strength.indicator", "name", "???", "temperature", "relative.humidity", "carbon.dioxide", "pressure", "ambient.light", "volatile.organic.compounds", "particulate.matter.1", "particulate.matter.2_5", "particulate.matter.4", "particulate.matter.10", "time.created"))
+
+glossary
+```
+
+#Cleaning data
+
+Two datasets - one for the principal component analysis (considering only PM10 as a representative of PM variables, due to high correlated) and one for the descriptive statistics,considering all 10 variables. 
+
+Data transformations.
+
+
+```{r cleaning}
+
+#descriptive statistics dataset
+
+CO2 <- log(d.mrakova.main$CO2)
+p <- log(d.mrakova.main$p)
+ambient_light <- log(d.mrakova.main$ambient_light)
+VOC_index <- log(d.mrakova.main$VOC_index)
+RH <- log(d.mrakova.main$RH)
+T <- log(d.mrakova.main$T)
+
+PM1 <- log(d.mrakova.main$PM1)
+PM2_5 <- log(d.mrakova.main$PM2_5)
+PM4 <- log(d.mrakova.main$PM4)
+PM10 <- log(d.mrakova.main$PM10)
+
+d.mrakova.clean.all <-d.mrakova.main %>% select(X, source, meta_sn, T, RH,VOC_index, PM1, PM2_5, PM4, PM10, CO2, p, ambient_light, created_at)
+
+#d.mrakova.main
+#d.mrakova.data.all <- cbind(d.mrakova.clean.all, CO2, p, ambient_light)
+
+d.mrakova.data.all <- d.mrakova.clean.all %>% 
+  arrange(desc(p))
+
+#d.mrakova.data.all
+
+# remove outliers
+d.mrakova.data.all <- d.mrakova.data.all[-c(1,2), ]
+d.mrakova.all <- d.mrakova.data.all
+
+d.mrakova.all$CO2[which(!is.finite(d.mrakova.all$CO2))] <- 0
+d.mrakova.all$VOC_index[which(!is.finite(d.mrakova.all$VOC_index))] <- 0
+d.mrakova.all$p[which(!is.finite(d.mrakova.all$p))] <- 0
+d.mrakova.all$ambient_light[which(!is.finite(d.mrakova.all$ambient_light))] <- 0
+d.mrakova.all$PM1[which(!is.finite(d.mrakova.all$PM1))] <- 0
+d.mrakova.all$PM2_5[which(!is.finite(d.mrakova.all$PM2_5))] <- 0
+d.mrakova.all$PM4[which(!is.finite(d.mrakova.all$PM4))] <- 0
+d.mrakova.all$PM10[which(!is.finite(d.mrakova.all$PM10))] <- 0
+
+#PCA dataset
+d.mrakova.clean <- d.mrakova.main %>% select(X, date, source, meta_sn, created_at) %>%
+  mutate(year = year(date)) %>%
+  mutate(month = month(date)) %>%
+  mutate(day = day(date)) %>%
+  mutate(hour = as.numeric(strftime(created_at, "%H"))) %>%
+  mutate(week = week(date))
+
+d.mrakova.data <- cbind(d.mrakova.clean, CO2, p, ambient_light, VOC_index, PM10,T, RH)
+d.mrakova.data <- d.mrakova.data %>% 
+  arrange(desc(p))
+
+d.mrakova.data$CO2[which(!is.finite(d.mrakova.data$CO2))] <- 0
+d.mrakova.data$VOC_index[which(!is.finite(d.mrakova.data$VOC_index))] <- 0
+d.mrakova.data$p[which(!is.finite(d.mrakova.data$p))] <- 0
+d.mrakova.data$ambient_light[which(!is.finite(d.mrakova.data$ambient_light))] <- 0
+d.mrakova.data$PM10[which(!is.finite(d.mrakova.data$PM10))] <- 0
+d.mrakova.data$RH[which(!is.finite(d.mrakova.data$RH))] <- 0
+d.mrakova.data$T[which(!is.finite(d.mrakova.data$T))] <- 0
+
+# remove outliers
+d.mrakova.data <- d.mrakova.data[-c(1,2), ]
+d.mrakova <- d.mrakova.data
+
+#prediction dataset
+
+d.mrakova.main.predict <- d.mrakova.main.predict %>% select(X, date, source, meta_sn, T, RH, created_at) %>%
+  mutate(year = year(date)) %>%
+  mutate(month = month(date)) %>%
+  mutate(day = day(date)) %>%
+  mutate(hour = as.numeric(strftime(created_at, "%H"))) %>%
+  mutate(week = week(date))
+
+d.mrakova.predict <- cbind(d.mrakova.main.predict, CO2, p, ambient_light, VOC_index, PM10)
+
+d.mrakova.predict <- d.mrakova.predict %>% 
+  arrange(desc(p))
+
+d.mrakova.predict$CO2[which(!is.finite(d.mrakova.predict$CO2))] <- 0
+d.mrakova.predict$VOC_index[which(!is.finite(d.mrakova.predict$VOC_index))] <- 0
+d.mrakova.predict$p[which(!is.finite(d.mrakova.predict$p))] <- 0
+d.mrakova.predict$ambient_light[which(!is.finite(d.mrakova.predict$ambient_light))] <- 0
+d.mrakova.predict$PM10[which(!is.finite(d.mrakova.predict$PM10))] <- 0
+
+# remove outliers
+d.mrakova.predict <- d.mrakova.predict[-c(1,2), ]
+
+```
+
+
+# Descriptive statistics
+
+### Summary statistics of complete data set - absolute values
+
+```{r descriptive1, echo=FALSE, warning=FALSE}
+
+summary(d.mrakova.data.all)
+
+```
+
+### Summary statistics of PCA data set - logarithmic values (except Temperature and Relative Humidity)
+
+```{r descriptive2, echo=FALSE, warning=FALSE}
+
+summary(d.mrakova)
+
+```
+
+### Summary statistics of Prediction data set - logarithmic values (except Temperature and Relative Humidity)
+
+```{r descriptive3.1, echo=FALSE, warning=FALSE}
+
+summary(d.mrakova.predict)
+
+```
+
+### Missing values
+
+```{r missing, echo=FALSE, warning=FALSE}
+
+d.mrakova.na <- d.mrakova.data.all
+
+#count by rows
+d.mrakova.na$num_nulls <- apply(d.mrakova.na, 1, function(x) sum(is.na(x)))
+
+#count by column
+data.na <- d.mrakova.na %>%
+    map_df(function(x) sum(is.na(x))) %>%
+    gather(feature, num_nulls) %>%
+    print(n = 100)
+
+#table
+#data.na
+
+```
+
+There are no missing measurements for the measured dates.
+
+
+### Duplicates
+
+Approximately 16.2% of observations are duplicated by date/time. 
+
+```{r descriptive3, echo=FALSE, warning=FALSE}
+
+d.mrakova.dup.all <- d.mrakova.all
+d.mrakova.dup <- d.mrakova
+d.mrakova.dup.predict <- d.mrakova.predict
+
+# total number of rows - observations
+count.all <- sum(complete.cases(d.mrakova.dup))
+
+# count duplicates by date
+count.d <- sum(table(d.mrakova.dup$created_at)-1)
+
+# proportion of duplicates
+count.d/count.all
+
+# remove duplicates for further analysis
+d.mrakova.non.dup.all <- d.mrakova.dup.all %>% distinct(created_at, .keep_all = TRUE)
+d.mrakova.non.dup <- d.mrakova.dup %>% distinct(created_at, .keep_all = TRUE)
+d.mrakova.non.dup.predict <- d.mrakova.dup.predict %>% distinct(created_at, .keep_all = TRUE)
+
+```
+
+```{r outliers2}
+
+#complete dataset
+
+outliers.no <- d.mrakova.non.dup.all
+
+# removing outliers
+
+#outliers.no <- d.mrakova.non.dup.all
+nrow(outliers.no)
+
+#VOC index
+Q <- quantile(outliers.no$VOC_index, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$VOC_index)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(VOC_index >= low & VOC_index <= up)
+
+
+#CO2
+Q <- quantile(outliers.no$CO2, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$CO2)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(CO2 >= low & CO2 <= up)
+
+
+#p
+Q <- quantile(outliers.no$p, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$p)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(p >= low & p <= up)
+
+
+#RH
+Q <- quantile(outliers.no$RH, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$RH)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(RH >= low & RH <= up)
+
+
+#PM1
+Q <- quantile(outliers.no$PM1, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$PM1)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(PM1 >= low & PM1 <= up)
+
+
+#PM2_5
+Q <- quantile(outliers.no$PM2_5, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$PM2_5)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(PM2_5 >= low & PM2_5 <= up)
+
+
+#PM4
+Q <- quantile(outliers.no$PM4, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$PM4)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(PM4 >= low & PM4 <= up)
+
+
+#PM10
+Q <- quantile(outliers.no$PM10, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$PM10)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(PM10 >= low & PM10 <= up)
+
+
+#ambient_light
+Q <- quantile(outliers.no$ambient_light, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$ambient_light)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(ambient_light >= low & ambient_light <= up)
+
+nrow(outliers.no)
+
+d.mrakova.non.dup.all <- outliers.no %>% ungroup()
+
+
+# PCA dataset
+
+outliers.no <- d.mrakova.non.dup
+
+# removing outliers
+
+nrow(outliers.no)
+
+#VOC index
+Q <- quantile(outliers.no$VOC_index, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$VOC_index)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(VOC_index >= low & VOC_index <= up)
+
+
+#CO2
+Q <- quantile(outliers.no$CO2, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$CO2)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(CO2 >= low & CO2 <= up)
+
+
+#p
+Q <- quantile(outliers.no$p, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$p)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(p >= low & p <= up)
+
+
+#RH
+Q <- quantile(outliers.no$RH, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$RH)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(RH >= low & RH <= up)
+
+
+#PM10
+Q <- quantile(outliers.no$PM10, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$PM10)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(PM10 >= low & PM10 <= up)
+
+
+#ambient_light
+Q <- quantile(outliers.no$ambient_light, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$ambient_light)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(ambient_light >= low & ambient_light <= up)
+
+nrow(outliers.no)
+
+d.mrakova.non.dup <- outliers.no %>% ungroup()
+
+
+#prediction dataset
+
+#complete dataset
+
+outliers.no <- d.mrakova.non.dup.predict
+
+# removing outliers
+
+nrow(outliers.no)
+
+#VOC index
+Q <- quantile(outliers.no$VOC_index, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$VOC_index)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(VOC_index >= low & VOC_index <= up)
+
+
+#CO2
+Q <- quantile(outliers.no$CO2, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$CO2)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(CO2 >= low & CO2 <= up)
+
+
+#p
+Q <- quantile(outliers.no$p, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$p)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(p >= low & p <= up)
+
+
+#RH
+Q <- quantile(outliers.no$RH, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$RH)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(RH >= low & RH <= up)
+
+
+#PM10
+Q <- quantile(outliers.no$PM10, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$PM10)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(PM10 >= low & PM10 <= up)
+
+
+#ambient_light
+Q <- quantile(outliers.no$ambient_light, probs=c(.25, .75), na.rm = FALSE)
+
+iqr <- IQR(outliers.no$ambient_light)
+
+up <- Q[2]+1.5*iqr # Upper Range  
+low<- Q[1]-1.5*iqr # Lower Range
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% filter(ambient_light >= low & ambient_light <= up)
+
+outliers.no <- outliers.no %>% group_by(meta_sn) %>% 
+  filter(ambient_light > low & ambient_light < up) %>% 
+  ungroup()
+
+nrow(outliers.no)
+
+d.mrakova.non.dup.predict <- outliers.no
+
+```
+
+### t-test comparison between sensors
+
+```{r ttest}
+
+# T
+T.test <- t.test(T ~ meta_sn, data = d.mrakova.non.dup.all)
+
+# CO2
+CO2.test <- t.test(CO2 ~ meta_sn, data = d.mrakova.non.dup.all)
+
+# p
+p.test <- t.test(p ~ meta_sn, data = d.mrakova.non.dup.all)
+
+# RH
+RH.test <- t.test(RH ~ meta_sn, data = d.mrakova.non.dup.all)
+
+# PM1
+PM1.test <- t.test(PM1 ~ meta_sn, data = d.mrakova.non.dup.all)
+
+# PM2_5
+PM2_5.test <- t.test(PM2_5 ~ meta_sn, data = d.mrakova.non.dup.all)
+
+# PM4
+PM4.test <- t.test(PM4 ~ meta_sn, data = d.mrakova.non.dup.all)
+
+# PM10
+PM10.test <- t.test(PM10 ~ meta_sn, data = d.mrakova.non.dup.all)
+
+# VOC_index
+VOC_index.test <- t.test(VOC_index ~ meta_sn, data = d.mrakova.non.dup.all)
+
+
+# ambient_light
+ambient_light.test <- t.test(ambient_light ~ meta_sn, data = d.mrakova.non.dup.all)
+
+
+T.test
+CO2.test
+RH.test
+p.test
+VOC_index.test
+ambient_light.test
+PM1.test
+PM2_5.test
+PM4.test
+PM10.test
+
+```
+
+### Descriptive statistics by sensor
+
+Duplicated values are approximately 10.3% for the first sensor and 4.6% for the second sensor.
+
+```{r descriptive4, echo=FALSE, warning=FALSE}
+
+#splitting data based on sensors
+
+X <- split(d.mrakova.non.dup.all, d.mrakova.non.dup.all$source)
+
+d.mrakova1 <- X[[1]]
+d.mrakova2 <- X[[2]]
+
+#examining duplicates
+#MRAKOVA 1
+
+# total number of rows - observations
+#count.all.1 <- sum(complete.cases(d.mrakova1))
+
+# count duplicates by date
+#count.d.1 <- sum(table(d.mrakova1$created_at)-1)
+
+# proportion of duplicates
+#count.d.1/count.all.1
+
+#MRAKOVA 2
+
+# total number of rows - observations
+#count.all.2 <- sum(complete.cases(d.mrakova2))
+
+# count duplicates by date
+#count.d.2 <- sum(table(d.mrakova2$created_at)-1)
+
+# proportion of duplicates
+#count.d.2/count.all.2
+
+```
+
+### Summary statistics by sensor
+
+Summary statistics sensor 1 and 2: 
+
+```{r descriptive.sensors, echo=FALSE, warning=FALSE}
+d.mrakov.non.dup.summary <- d.mrakova.non.dup.all %>% split(.$meta_sn) %>% map(summary)
+#sd.mrakov.non.dup.summary
+
+```
+
+```{r twodatasets}
+
+d.mrakova.non.dup.1 <- d.mrakova1 %>%
+  select(source,meta_sn, T, RH, CO2, p, ambient_light, VOC_index, PM1, PM2_5, PM4, PM10, created_at) %>% 
+  distinct(created_at, .keep_all = TRUE) 
+
+d.mrakova.non.dup.1$time <- as.Date(strptime(d.mrakova.non.dup.1$created_at, "%Y-%m-%d %H:%M:%S"))
+
+#d.mrakova1
+
+d.mrakova.non.dup.2 <- d.mrakova2 %>%
+  select(source, meta_sn, T, RH, CO2, p, ambient_light, VOC_index, PM1, PM2_5, PM4, PM10, created_at) %>% 
+  distinct(created_at, .keep_all = TRUE) 
+
+d.mrakova.non.dup.2$time <- as.Date(strptime(d.mrakova.non.dup.2$created_at, "%Y-%m-%d %H:%M:%S"))
+
+#d.mrakova2
+```
+
+
+### Density of individual variables for both senors
+
+```{r descriptive.sensors2, echo=FALSE, warning=FALSE}
+
+par(mfrow=c(2,2))
+
+#temperature sensor 1
+
+m<-mean(d.mrakova.non.dup.1$T);std<-sqrt(var(d.mrakova.non.dup.1$T))
+hist(d.mrakova.non.dup.1$T,prob=T,main="Temperature - Sensor 1")
+curve(dnorm(x, mean=m, sd=std), col="darkblue", lwd=2, add=TRUE) 
+
+#temperature sensor 2
+
+m2<-mean(d.mrakova.non.dup.2$T);std2<-sqrt(var(d.mrakova.non.dup.2$T))
+hist(d.mrakova.non.dup.2$T,prob=T,main="Temperature - Sensor 2")
+curve(dnorm(x, mean=m2, sd=std2), col="darkblue" , lwd=2, add=TRUE) 
+
+
+#RH sensor 1
+
+m3<-mean(d.mrakova.non.dup.1$RH);std3<-sqrt(var(d.mrakova.non.dup.1$RH))
+hist(d.mrakova.non.dup.1$RH,prob=T,main="RH - Sensor 1")
+curve(dnorm(x, mean=m3, sd=std3), col="darkblue", lwd=2, add=TRUE) 
+
+#RH sensor 2
+
+m4<-mean(d.mrakova.non.dup.2$RH);std4<-sqrt(var(d.mrakova.non.dup.2$RH))
+hist(d.mrakova.non.dup.2$RH,prob=T,main="RH - Sensor 2")
+curve(dnorm(x, mean=m4, sd=std4), col="darkblue", lwd=2, add=TRUE)
+
+par(mfrow=c(2,2))
+
+
+# CO2 sensor 1
+co2 <- d.mrakova.non.dup.1$CO2
+
+m5<-mean(d.mrakova.non.dup.1$CO2);std5<-sqrt(var(d.mrakova.non.dup.1$CO2))
+hist(co2,prob=T,main="CO2 - Sensor 1", xlab="C02")
+curve(dnorm(x, mean=m5, sd=std5), col="darkblue", lwd=2, add=TRUE) 
+
+# CO2 sensor 2
+co2 <- d.mrakova.non.dup.2$CO2
+
+m6<-mean(d.mrakova.non.dup.2$CO2);std6<-sqrt(var(d.mrakova.non.dup.2$CO2))
+hist(co2,prob=T,main="CO2 - Sensor 2", xlab="CO2")
+curve(dnorm(x, mean=m6, sd=std6), col="darkblue", lwd=2, add=TRUE)
+
+
+
+# ph sensor 1
+
+m7<-mean(d.mrakova.non.dup.1$p);std7<-sqrt(var(d.mrakova.non.dup.1$p))
+hist(d.mrakova.non.dup.1$p,prob=T,main="pressure - Sensor 1")
+curve(dnorm(x, mean=m7, sd=std7), col="darkblue", lwd=2, add=TRUE) 
+
+# ph sensor 2
+
+m8<-mean(d.mrakova.non.dup.2$p);std8<-sqrt(var(d.mrakova.non.dup.2$p))
+hist(d.mrakova.non.dup.2$p,prob=T,main="pressure - Sensor 2")
+curve(dnorm(x, mean=m8, sd=std8), col="darkblue", lwd=2, add=TRUE) 
+
+
+par(mfrow=c(2,2))
+
+# ambient light sensor 1
+
+m9<-mean(d.mrakova.non.dup.1$ambient_light);std9<-sqrt(var(d.mrakova.non.dup.1$ambient_light))
+hist(d.mrakova.non.dup.1$ambient_light,prob=T,main="Ambient light - Sensor 1")
+curve(dnorm(x, mean=m9, sd=std9), col="darkblue", lwd=2, add=TRUE) 
+
+# ambient light sensor 2
+
+m10<-mean(d.mrakova.non.dup.2$ambient_light);std10<-sqrt(var(d.mrakova.non.dup.2$ambient_light))
+hist(d.mrakova.non.dup.2$ambient_light,prob=T,main="Ambient light - Sensor 2")
+curve(dnorm(x, mean=m10, sd=std10), col="darkblue", lwd=2, add=TRUE)
+
+
+# VOC index sensor 1
+voc <- d.mrakova.non.dup.1$VOC_index
+
+m11<-mean(d.mrakova.non.dup.1$VOC_index);std11<-sqrt(var(d.mrakova.non.dup.1$VOC_index))
+hist(d.mrakova.non.dup.1$VOC_index,prob=T,main="VOC index - Sensor 1", xlab="VOC index")
+curve(dnorm(x, mean=m11, sd=std11), col="darkblue", lwd=2, add=TRUE) 
+
+# VOC index sensor 2
+
+voc <- d.mrakova.non.dup.2$VOC_index
+
+m12<-mean(d.mrakova.non.dup.2$VOC_index);std12<-sqrt(var(d.mrakova.non.dup.2$VOC_index))
+hist(voc,prob=T,main="VOC index - Sensor 2", xlab="VOC index")
+curve(dnorm(x, mean=m12, sd=std12), col="darkblue", lwd=2, add=TRUE)
+
+
+par(mfrow=c(2,2))
+
+# PM1 sensor 1
+
+m13<-mean(d.mrakova.non.dup.1$PM1);std13<-sqrt(var(d.mrakova.non.dup.1$PM1))
+hist(d.mrakova.non.dup.1$PM1,prob=T,main="PM 1 - Sensor 1")
+curve(dnorm(x, mean=m13, sd=std13), col="darkblue", lwd=2, add=TRUE) 
+
+# PM1 sensor 2
+
+m14<-mean(d.mrakova.non.dup.2$PM1);std14<-sqrt(var(d.mrakova.non.dup.2$PM1))
+hist(d.mrakova.non.dup.2$PM1,prob=T,main="PM 1 - Sensor 2")
+curve(dnorm(x, mean=m14, sd=std14), col="darkblue", lwd=2, add=TRUE)
+
+
+# PM2_5 sensor 1
+
+m15<-mean(d.mrakova.non.dup.1$PM2_5);std15<-sqrt(var(d.mrakova.non.dup.1$PM2_5))
+hist(d.mrakova.non.dup.1$PM2_5,prob=T,main="PM 2.5 - Sensor 1")
+curve(dnorm(x, mean=m15, sd=std15), col="darkblue", lwd=2, add=TRUE) 
+
+# PM2_5 sensor 2
+
+m16<-mean(d.mrakova.non.dup.2$PM2_5);std16<-sqrt(var(d.mrakova.non.dup.2$PM2_5))
+hist(d.mrakova.non.dup.2$PM2_5,prob=T,main="PM 2.5 - Sensor 2")
+curve(dnorm(x, mean=m16, sd=std16), col="darkblue", lwd=2, add=TRUE) 
+
+
+par(mfrow=c(2,2))
+
+# PM4 sensor 1
+
+m17<-mean(d.mrakova.non.dup.1$PM4);std17<-sqrt(var(d.mrakova.non.dup.1$PM4))
+hist(d.mrakova.non.dup.1$PM4,prob=T,main="PM 4 - Sensor 1")
+curve(dnorm(x, mean=m17, sd=std17), col="darkblue", lwd=2, add=TRUE) 
+
+# PM4 sensor 2
+
+m18<-mean(d.mrakova.non.dup.2$PM4);std18<-sqrt(var(d.mrakova.non.dup.2$PM4))
+hist(d.mrakova.non.dup.2$PM4,prob=T,main="PM 4 - Sensor 2")
+curve(dnorm(x, mean=m18, sd=std18), col="darkblue", lwd=2, add=TRUE)
+
+
+# PM10 sensor 1
+
+pm10 <- d.mrakova.non.dup.1$PM10
+
+m19<-mean(d.mrakova.non.dup.1$PM10);std19<-sqrt(var(d.mrakova.non.dup.1$PM10))
+hist(pm10,prob=T,main="PM 10 - Sensor 1", xlab="PM 10")
+curve(dnorm(x, mean=m19, sd=std19), col="darkblue", lwd=2, add=TRUE) 
+
+# PM10 sensor 2
+
+pm10 <- d.mrakova.non.dup.2$PM10
+
+m20<-mean(d.mrakova.non.dup.2$PM10);std20<-sqrt(var(d.mrakova.non.dup.2$PM10))
+hist(pm10,prob=T,main="PM 10 - Sensor 2", xlab="PM 10")
+curve(dnorm(x, mean=m20, sd=std20), col="darkblue", lwd=2, add=TRUE) 
+
+par(mfrow=c(2,2))
+```
+
+# Corelation analysis
+
+### Correlation matrix Mrakova 1:
+(chart and table format)
+
+```{r correlationanalysis1, echo=FALSE, warning=FALSE}
+
+#MRAKOVA 1
+d.mrakova1.data <- d.mrakova1 %>% select(T,RH,CO2, p, ambient_light, VOC_index, PM1, PM2_5, PM4, PM10)
+
+#correlation matrix calculation and visualization
+d.mrakova1.cor = cor(d.mrakova1.data)
+
+corrplot1 <- corrplot(d.mrakova1.cor)
+corrplot1
+
+d.mrakova1.cor
+```
+
+
+### Correlation matrix Mrakova 2:
+(chart and table format)
+
+```{r correlationanalysis2, echo=FALSE, warning=FALSE}
+
+#MRAKOVA 2
+d.mrakova2.data <- d.mrakova2 %>% select(T,RH,CO2, p, ambient_light, VOC_index, PM1, PM2_5, PM4, PM10)
+
+#correlation matrix calculation and visualization
+d.mrakova2.cor = cor(d.mrakova2.data)
+
+corrplot2 <- corrplot(d.mrakova2.cor)
+corrplot2
+
+d.mrakova2.cor
+```
+ 
+## PCA analysis 
+
+#scaling and normalisation of data
+
+```{r normandscale}
+
+d.mrakova.non.dup.pca.norm <- d.mrakova.non.dup %>% 
+  select(T, RH, VOC_index, PM10, CO2, ambient_light, p)
+  
+normalise(d.mrakova.non.dup.pca.norm)
+scale(d.mrakova.non.dup.pca.norm)
+
+#d.mrakova.non.dup.pca.norm
+
+#d.mrakova.non.dup.pca.norm.all
+
+```
+
+```{r normandscale2, results="hide"}
+
+#normalise(d.mrakova.non.dup.pca.norm)
+
+#scale(d.mrakova.non.dup.pca.norm)
+
+week <- d.mrakova.non.dup$week
+meta_sn <- d.mrakova.non.dup$meta_sn
+
+d.mrakova.non.dup.pca.norm.all <- cbind(d.mrakova.non.dup.pca.norm, meta_sn,  week)
+d.mrakova.non.dup.pca.norm.all
+```
+
+PCA analysis
+
+```{r pcadetailed}
+
+#PCA ANALYSIS
+
+#d.mrakova.non.dup.pca <- d.mrakova.non.dup %>% select(T, RH, VOC_index, PM10, meta_sn, CO2, ambient_light, p) %>% group_by(meta_sn)
+
+d.mrakova.non.dup.pca <- d.mrakova.non.dup.pca.norm.all %>% group_by(meta_sn, week)
+
+d.mrakova.non.dup.pca <- aggregate(d.mrakova.non.dup.pca[, 1:7], list(meta_sn, week), mean)
+
+res.pca <- PCA(d.mrakova.non.dup.pca, scale.unit = TRUE, ncp = 5, graph = TRUE)
+
+#d.mrakova.non.dup.pca <- d.mrakova.non.dup.pca.norm.all %>% 
+#  group_by(d.mrakova.non.dup$meta_sn, d.mrakova.non.dup$week) %>% 
+#  ggbiplot(res.pca, ellipse=TRUE, groups=d.mrakova.non.dup$meta_sn)
+
+#graph of variables
+var_plot <- ggbiplot(res.pca, group = d.mrakova.non.dup.pca$Group.1, ellipse = T) + theme_bw()
+var_plot
+
+####################################################################################################
+#REMOVE THIS PART PROBABLY - DOUBLE CHECK
+
+# EIGENVALUES
+eig.val <- get_eigenvalue(res.pca)
+eig.val
+
+#graph eigne values - scree plot
+fviz_eig(res.pca, addlabels = TRUE, ylim = c(0, 50))
+
+#RESULTS
+#graph results
+var <- get_pca_var(res.pca)
+var
+
+
+# Coordinates
+head(var$coord)
+# Cos2: quality on the factore map
+head(var$cos2)
+# Contributions to the principal components
+head(var$contrib)
+
+
+#QUALITY OF REPRESENTATION
+head(var$cos2, 7)
+
+#correlation plot
+corrplot(var$cos2, is.corr=FALSE)
+
+# Total cos2 of variables on Dim.1 and Dim.2
+fviz_cos2(res.pca, choice = "var", axes = 1:2)
+
+
+# Change the transparency by cos2 values
+fviz_pca_var(res.pca, alpha.var = "cos2")
+
+
+#CONTRIBUTIONS TO INDVIDIUAL VARIABLES
+# Contributions of variables to PC1
+fviz_contrib(res.pca, choice = "var", axes = 1, top = 10)
+# Contributions of variables to PC2
+fviz_contrib(res.pca, choice = "var", axes = 2, top = 10)
+# Contributions of variables to PC3
+fviz_contrib(res.pca, choice = "var", axes = 3, top = 10)
+
+###################################################################################
+#contributions chart
+fviz_pca_var(res.pca, col.var = "contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")
+             )
+```
+## Heat Maps
+
+Temperature
+
+```{r heat1}
+p <-ggplot(d.mrakova.non.dup, aes(day, hour, fill=T))+
+  geom_tile(color= "white",size=0.1) + 
+  scale_fill_viridis(name="Hourly Temps C",option ="C") +
+  facet_grid(meta_sn ~ month)
+
+p <-p + scale_x_continuous(breaks =c(1,10,20,31))
+p <-p + labs(title= paste("Hourly Temperature"), x="Day", y="Hour Commencing")
+p <-p + theme(legend.position = "bottom")+
+  theme(plot.title=element_text(size = 14))+
+  theme(axis.text.y=element_text(size=6)) +
+  theme(strip.background = element_rect(colour="white"))+
+  theme(plot.title=element_text(hjust=0))+
+  theme(axis.ticks=element_blank())+
+  theme(axis.text=element_text(size=7))+
+  theme(legend.title=element_text(size=8))+
+  theme(legend.text=element_text(size=6))
+
+p
+```
+
+CO2
+
+```{r heat2}
+p <-ggplot(d.mrakova.non.dup, aes(day, hour, fill=CO2))+
+  geom_tile(color= "white",size=0.1) + 
+  scale_fill_viridis(name="Hourly CO2",option ="C")
+
+p <-p + facet_grid(meta_sn ~ month)
+p <-p + scale_x_continuous(breaks =c(1,10,20,31))
+p <-p + labs(title= paste("Hourly CO2"), x="Day", y="Hour Commencing")
+p <-p + theme(legend.position = "bottom")+
+  theme(plot.title=element_text(size = 14))+
+  theme(axis.text.y=element_text(size=6)) +
+  theme(strip.background = element_rect(colour="white"))+
+  theme(plot.title=element_text(hjust=0))+
+  theme(axis.ticks=element_blank())+
+  theme(axis.text=element_text(size=7))+
+  theme(legend.title=element_text(size=8))+
+  theme(legend.text=element_text(size=6))
+
+p
+```
+
+VOC index
+
+```{r heat3}
+p <-ggplot(d.mrakova.non.dup, aes(day, hour, fill=VOC_index))+
+  geom_tile(color= "white",size=0.1) + 
+  scale_fill_viridis(name="Hourly VOC index",option ="C")
+
+p <-p + facet_grid(meta_sn ~ month)
+p <-p + scale_x_continuous(breaks =c(1,10,20,31))
+p <-p + labs(title= paste("Hourly VOC index"), x="Day", y="Hour Commencing")
+p <-p + theme(legend.position = "bottom")+
+  theme(plot.title=element_text(size = 14))+
+  theme(axis.text.y=element_text(size=6)) +
+  theme(strip.background = element_rect(colour="white"))+
+  theme(plot.title=element_text(hjust=0))+
+  theme(axis.ticks=element_blank())+
+  theme(axis.text=element_text(size=7))+
+  theme(legend.title=element_text(size=8))+
+  theme(legend.text=element_text(size=6))
+
+p
+```
+
+Particulate matter (size 10)
+
+```{r heat4}
+p <-ggplot(d.mrakova.non.dup, aes(day, hour, fill=PM10))+
+  geom_tile(color= "white",size=0.1) + 
+  scale_fill_viridis(name="Hourly particulate matter particles 10",option ="C")
+
+p <-p + facet_grid(meta_sn ~ month)
+p <-p + scale_x_continuous(breaks =c(1,10,20,31))
+p <-p + labs(title= paste("Hourly PM10"), x="Day", y="Hour Commencing")
+p <-p + theme(legend.position = "bottom")+
+  theme(plot.title=element_text(size = 14))+
+  theme(axis.text.y=element_text(size=6)) +
+  theme(strip.background = element_rect(colour="white"))+
+  theme(plot.title=element_text(hjust=0))+
+  theme(axis.ticks=element_blank())+
+  theme(axis.text=element_text(size=7))+
+  theme(legend.title=element_text(size=8))+
+  theme(legend.text=element_text(size=6))
+
+p
+```
+
+Relative humidity
+
+```{r heat5}
+p <-ggplot(d.mrakova.non.dup, aes(day, hour, fill=RH))+
+  geom_tile(color= "white",size=0.1) + 
+  scale_fill_viridis(name="Hourly RH",option ="C")
+
+p <-p + facet_grid(meta_sn ~ month)
+p <-p + scale_x_continuous(breaks =c(1,10,20,31))
+p <-p + labs(title= paste("Hourly RH"), x="Day", y="Hour Commencing")
+p <-p + theme(legend.position = "bottom")+
+  theme(plot.title=element_text(size = 14))+
+  theme(axis.text.y=element_text(size=6)) +
+  theme(strip.background = element_rect(colour="white"))+
+  theme(plot.title=element_text(hjust=0))+
+  theme(axis.ticks=element_blank())+
+  theme(axis.text=element_text(size=7))+
+  theme(legend.title=element_text(size=8))+
+  theme(legend.text=element_text(size=6))
+
+p
+```
+
+Ambient light
+
+```{r heat6}
+p <-ggplot(d.mrakova.non.dup, aes(day, hour, fill=ambient_light))+
+  geom_tile(color= "white",size=0.1) + 
+  scale_fill_viridis(name="Hourly ambient light",option ="C")
+
+p <-p + facet_grid(meta_sn ~ month)
+p <-p + scale_x_continuous(breaks =c(1,10,20,31))
+p <-p + labs(title= paste("Hourly ambeint light"), x="Day", y="Hour Commencing")
+p <-p + theme(legend.position = "bottom")+
+  theme(plot.title=element_text(size = 14))+
+  theme(axis.text.y=element_text(size=6)) +
+  theme(strip.background = element_rect(colour="white"))+
+  theme(plot.title=element_text(hjust=0))+
+  theme(axis.ticks=element_blank())+
+  theme(axis.text=element_text(size=7))+
+  theme(legend.title=element_text(size=8))+
+  theme(legend.text=element_text(size=6))
+
+p
+```
+
+Pressure
+
+```{r heat7}
+p <-ggplot(d.mrakova.non.dup, aes(day, hour, fill=p))+
+  geom_tile(color= "white",size=0.1) + 
+  scale_fill_viridis(name="Hourly pressure",option ="C")
+
+p <-p + facet_grid(meta_sn ~ month)
+p <-p + scale_x_continuous(breaks =c(1,10,20,31))
+p <-p + labs(title= paste("Hourly pressure"), x="Day", y="Hour Commencing")
+p <-p + theme(legend.position = "bottom")+
+  theme(plot.title=element_text(size = 14))+
+  theme(axis.text.y=element_text(size=6)) +
+  theme(strip.background = element_rect(colour="white"))+
+  theme(plot.title=element_text(hjust=0))+
+  theme(axis.ticks=element_blank())+
+  theme(axis.text=element_text(size=7))+
+  theme(legend.title=element_text(size=8))+
+  theme(legend.text=element_text(size=6))
+
+p
+```
