@@ -1,7 +1,7 @@
 ---
 title: "Analysis - general and PCA"
 author: "Marina Paldauf"
-date: "20/05/2021"
+date: "01/05/2021"
 output:
   html_document:
     toc: yes
@@ -45,7 +45,7 @@ library(TTR)
 
 Data access - Relevant data saved in the form of the file for privacy reasons, preventing sharing direct access to the database. 
 
-Data set includes data form two sensors located at the Mrakova Farm near Bled, Slovenia. Sensor 1 is located in the 1st floor, and sensor 2 is located in the ground floor. Data set includes dates from 24.6.2020 until 31.12.2020. Both of them are hanging in the air attached to a string. Prediction is done on the dataset between 14.8.2020 and 31.12.2020, due to a large chunk of missing data in July 2020.
+Data set includes data form two sensors located at the Mrak's Farm near Bled, Slovenia. Sensor 1 is located in the 1st floor, and sensor 2 is located in the ground floor. Data set includes dates from 24.6.2020 until 31.12.2020. Both of them are hanging in the air attached to a string. Prediction is done on the data set between 14.8.2020 and 31.12.2020, due to a large chunk of missing data in July 2020.
 
 
 ```{r data, warning=FALSE}
@@ -63,14 +63,14 @@ Glossary of variable names:
 column.names <- colnames(d.mrakova.main , do.NULL = TRUE, prefix = "col")
 
 
-glossary <- cbind(column.names,c("X","sensor.calss.1", "sensor.class.2", "???", "IP", "received.signal.strength.indicator", "name", "???", "temperature", "relative.humidity", "carbon.dioxide", "pressure", "ambient.light", "volatile.organic.compounds", "particulate.matter.1", "particulate.matter.2_5", "particulate.matter.4", "particulate.matter.10", "time.created"))
+glossary <- cbind(column.names,c("X","sensor.calss.1", "sensor.class.2", "NA", "IP", "received.signal.strength.indicator", "name", "NA", "temperature", "relative.humidity", "carbon.dioxide", "pressure", "ambient.light", "volatile.organic.compounds", "particulate.matter.1", "particulate.matter.2_5", "particulate.matter.4", "particulate.matter.10", "time.created"))
 
 glossary
 ```
 
 #Cleaning data
 
-Two datasets - one for the principal component analysis (considering only PM10 as a representative of PM variables, due to high correlated) and one for the descriptive statistics,considering all 10 variables. 
+Two data sets - one for the principal component analysis (considering only PM10 as a representative of PM variable) and one for the descriptive statistics,considering all 10 variables. 
 
 Data transformations.
 
@@ -93,13 +93,8 @@ PM10 <- log(d.mrakova.main$PM10)
 
 d.mrakova.clean.all <-d.mrakova.main %>% select(X, source, meta_sn, T, RH,VOC_index, PM1, PM2_5, PM4, PM10, CO2, p, ambient_light, created_at)
 
-#d.mrakova.main
-#d.mrakova.data.all <- cbind(d.mrakova.clean.all, CO2, p, ambient_light)
-
 d.mrakova.data.all <- d.mrakova.clean.all %>% 
   arrange(desc(p))
-
-#d.mrakova.data.all
 
 # remove outliers
 d.mrakova.data.all <- d.mrakova.data.all[-c(1,2), ]
@@ -238,6 +233,40 @@ d.mrakova.non.dup <- d.mrakova.dup %>% distinct(created_at, .keep_all = TRUE)
 d.mrakova.non.dup.predict <- d.mrakova.dup.predict %>% distinct(created_at, .keep_all = TRUE)
 
 ```
+
+
+### Outliers 
+
+Vial plots - before outliers removal
+
+```{r outliers}
+
+jpeg("vialplots_before.jpg", width = 400, height = 500)
+
+d.mrakova.non.dup.all$meta_sn <- as.factor(d.mrakova.non.dup.all$meta_sn)
+
+p <- ggplot(d.mrakova.non.dup.all, mapping = aes(fill=meta_sn, x=meta_sn, y=VOC_index)) + geom_violin() + geom_boxplot(width=0.1)
+
+p1 <- ggplot(d.mrakova.non.dup.all, mapping = aes(fill=meta_sn, x=meta_sn, y=T)) + geom_violin() + geom_boxplot(width=0.1)
+
+p2 <- ggplot(d.mrakova.non.dup.all, mapping = aes(fill=meta_sn, x=meta_sn, y=CO2)) + geom_violin() + geom_boxplot(width=0.1)
+
+p3 <- ggplot(d.mrakova.non.dup.all, mapping = aes(fill=meta_sn, x=meta_sn, y=RH)) + geom_violin() + geom_boxplot(width=0.1)
+
+p4 <- ggplot(d.mrakova.non.dup.all, mapping = aes(fill=meta_sn, x=meta_sn, y=PM10)) + geom_violin() + geom_boxplot(width=0.1)
+
+p5 <- ggplot(d.mrakova.non.dup.all, mapping = aes(fill=meta_sn, x=meta_sn, y=p)) + geom_violin() + geom_boxplot(width=0.1)
+
+p6 <- ggplot(d.mrakova.non.dup.all, mapping = aes(fill=meta_sn, x=meta_sn, y=ambient_light)) + geom_violin() + geom_boxplot(width=0.1)
+
+#create grid
+grid.arrange(p, p1, p2, p3, p4, p5, p6, nrow = 4)
+
+dev.off()
+
+```
+
+Outlier removal. 
 
 ```{r outliers2}
 
@@ -516,6 +545,35 @@ d.mrakova.non.dup.predict <- outliers.no
 
 ```
 
+Vial plots - after outliers removal
+
+```{r outliers3}
+jpeg("vialplots_after.jpg", width = 400, height = 500)
+
+d.mrakova.non.dup.all$meta_sn <- as.factor(d.mrakova.non.dup.all$meta_sn)
+
+p <- ggplot(d.mrakova.non.dup.all, mapping = aes(fill=meta_sn, x=meta_sn, y=VOC_index)) + geom_violin() + geom_boxplot(width=0.1)
+
+p1 <- ggplot(d.mrakova.non.dup.all, mapping = aes(fill=meta_sn, x=meta_sn, y=T)) + geom_violin() + geom_boxplot(width=0.1)
+
+p2 <- ggplot(d.mrakova.non.dup.all, mapping = aes(fill=meta_sn, x=meta_sn, y=CO2)) + geom_violin() + geom_boxplot(width=0.1)
+
+p3 <- ggplot(d.mrakova.non.dup.all, mapping = aes(fill=meta_sn, x=meta_sn, y=RH)) + geom_violin() + geom_boxplot(width=0.1)
+
+p4 <- ggplot(d.mrakova.non.dup.all, mapping = aes(fill=meta_sn, x=meta_sn, y=PM10)) + geom_violin() + geom_boxplot(width=0.1)
+
+p5 <- ggplot(d.mrakova.non.dup.all, mapping = aes(fill=meta_sn, x=meta_sn, y=p)) + geom_violin() + geom_boxplot(width=0.1)
+
+p6 <- ggplot(d.mrakova.non.dup.all, mapping = aes(fill=meta_sn, x=meta_sn, y=ambient_light)) + geom_violin() + geom_boxplot(width=0.1)
+
+#create grid
+grid.arrange(p, p1, p2, p3, p4, p5, p6, nrow = 3)
+
+dev.off()
+
+```
+
+
 ### t-test comparison between sensors
 
 ```{r ttest}
@@ -622,6 +680,7 @@ d.mrakova.non.dup.1 <- d.mrakova1 %>%
 d.mrakova.non.dup.1$time <- as.Date(strptime(d.mrakova.non.dup.1$created_at, "%Y-%m-%d %H:%M:%S"))
 
 #d.mrakova1
+
 
 d.mrakova.non.dup.2 <- d.mrakova2 %>%
   select(source, meta_sn, T, RH, CO2, p, ambient_light, VOC_index, PM1, PM2_5, PM4, PM10, created_at) %>% 
@@ -838,17 +897,9 @@ d.mrakova.non.dup.pca.norm <- d.mrakova.non.dup %>%
 normalise(d.mrakova.non.dup.pca.norm)
 scale(d.mrakova.non.dup.pca.norm)
 
-#d.mrakova.non.dup.pca.norm
-
-#d.mrakova.non.dup.pca.norm.all
-
 ```
 
 ```{r normandscale2, results="hide"}
-
-#normalise(d.mrakova.non.dup.pca.norm)
-
-#scale(d.mrakova.non.dup.pca.norm)
 
 week <- d.mrakova.non.dup$week
 meta_sn <- d.mrakova.non.dup$meta_sn
@@ -863,74 +914,22 @@ PCA analysis
 
 #PCA ANALYSIS
 
-#d.mrakova.non.dup.pca <- d.mrakova.non.dup %>% select(T, RH, VOC_index, PM10, meta_sn, CO2, ambient_light, p) %>% group_by(meta_sn)
-
 d.mrakova.non.dup.pca <- d.mrakova.non.dup.pca.norm.all %>% group_by(meta_sn, week)
 
 d.mrakova.non.dup.pca <- aggregate(d.mrakova.non.dup.pca[, 1:7], list(meta_sn, week), mean)
 
 res.pca <- PCA(d.mrakova.non.dup.pca, scale.unit = TRUE, ncp = 5, graph = TRUE)
 
-#d.mrakova.non.dup.pca <- d.mrakova.non.dup.pca.norm.all %>% 
-#  group_by(d.mrakova.non.dup$meta_sn, d.mrakova.non.dup$week) %>% 
-#  ggbiplot(res.pca, ellipse=TRUE, groups=d.mrakova.non.dup$meta_sn)
-
 #graph of variables
 var_plot <- ggbiplot(res.pca, group = d.mrakova.non.dup.pca$Group.1, ellipse = T) + theme_bw()
 var_plot
 
-####################################################################################################
-#REMOVE THIS PART PROBABLY - DOUBLE CHECK
-
-# EIGENVALUES
-eig.val <- get_eigenvalue(res.pca)
-eig.val
-
-#graph eigne values - scree plot
-fviz_eig(res.pca, addlabels = TRUE, ylim = c(0, 50))
-
-#RESULTS
-#graph results
-var <- get_pca_var(res.pca)
-var
-
-
-# Coordinates
-head(var$coord)
-# Cos2: quality on the factore map
-head(var$cos2)
-# Contributions to the principal components
-head(var$contrib)
-
-
-#QUALITY OF REPRESENTATION
-head(var$cos2, 7)
-
-#correlation plot
-corrplot(var$cos2, is.corr=FALSE)
-
-# Total cos2 of variables on Dim.1 and Dim.2
-fviz_cos2(res.pca, choice = "var", axes = 1:2)
-
-
-# Change the transparency by cos2 values
-fviz_pca_var(res.pca, alpha.var = "cos2")
-
-
-#CONTRIBUTIONS TO INDVIDIUAL VARIABLES
-# Contributions of variables to PC1
-fviz_contrib(res.pca, choice = "var", axes = 1, top = 10)
-# Contributions of variables to PC2
-fviz_contrib(res.pca, choice = "var", axes = 2, top = 10)
-# Contributions of variables to PC3
-fviz_contrib(res.pca, choice = "var", axes = 3, top = 10)
-
-###################################################################################
 #contributions chart
 fviz_pca_var(res.pca, col.var = "contrib",
              gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07")
              )
 ```
+
 ## Heat Maps
 
 Temperature

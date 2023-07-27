@@ -1,7 +1,7 @@
 ---
 title: "SVR VOC index sensor 2 - 10th"
 author: "Marina Paldauf"
-date: "12/10/2020"
+date: "05/05/2021"
 output:
   html_document:
     toc: yes
@@ -54,16 +54,12 @@ d.mrakova.main.predict <- d.mrakova.main %>%
   mutate(date = as.POSIXct(created_at, "%Y-%m-%d %H:%M:%S")) %>%
   filter(date <= as.POSIXct("2020-12-31 23:59:59") & date >= as.POSIXct("2020-08-15 00:00:00"))
 
-nrow(d.mrakova.main.predict)
-head(d.mrakova.main.predict)
-#write.csv(d.mrakova.main,'sensor_data_2020.csv')
-
 ```
 
 
 # Cleaning data
 
-Keeping only needed variables and creating a variable to handle time variable.
+Keeping only needed variables and creating a variable to handle time variable and removing two extreme pressure outliers due to sensor faultiness.
 
 ```{r cleaning}
 
@@ -177,7 +173,6 @@ nrow(outliers.no2)
 
 d.mrakova.non.dup.predict <- outliers.no2
 
-summary(d.mrakova.non.dup.predict)
 ```
 
 
@@ -205,8 +200,6 @@ d.mrakova.svm.log$p[which(!is.finite(d.mrakova.svm.log$p))] <- 0
 d.mrakova.svm.log$ambient_light[which(!is.finite(d.mrakova.svm.log$ambient_light))] <- 0
 d.mrakova.svm.log$PM10[which(!is.finite(d.mrakova.svm.log$PM10))] <- 0
 
-summary(d.mrakova.svm.log)
-
 ```
 
 
@@ -225,7 +218,6 @@ d.mrakova.sensor2 <- d.mrakova.svm.log
 
 #reducing dataset 
 d.mrakova.sensor2.small = d.mrakova.sensor2[seq(1, nrow(d.mrakova.sensor2), 10), ]
-nrow(d.mrakova.sensor2.small)
 
 d.mrakova.sensor2.selectedVOC<- d.mrakova.sensor2.small %>% select(T, RH, PM10, p, ambient_light, CO2, VOC_index, created_at)
 
@@ -238,7 +230,6 @@ VOC_2_standardized <-
   mutate(T = scale(T))%>%
   mutate(RH = scale(RH)) %>%
   mutate(p = scale(p))
-  #mutate(ambient_light = scale(ambient_light))
 
 # VOC
 
@@ -246,25 +237,16 @@ validation_index2 <- createDataPartition(VOC_2_standardized$VOC_index, p=0.60, l
 validation2 <- VOC_2_standardized[-validation_index2,]
 d.mrakova.sensor2.selectedVOC <- VOC_2_standardized[validation_index2,]
 
-#dim(d.mrakova.sensor2.selectedVOC)
-
-#levels(d.mrakova.sensor2.selectedVOC$VOC_index)
-
-summary(d.mrakova.sensor2.selectedVOC)
-
 ```
 
 
-## Support vector regression
+## Support vector regression model
 
 ### Fit SVR model and visualize using scatter plot
 
 Training and prediction.
 
 ```{r svmBasic}
-
-#Scatter Plot
-#plot(d.mrakova.sensor2.selectedVOC)
 
 # regression training model SVM
 model2 <- svm(VOC_index~T + RH + PM10 + p + ambient_light+ CO2, data = d.mrakova.sensor2.selectedVOC)
@@ -287,8 +269,6 @@ validation_s2_new1_graph <- validation_s2_new1 %>%
    mutate(date = as.POSIXct(created_at), format="%Y-%m-%d %H:%M:%S") %>% select(date, pred_VOC_s2, VOC_index) %>%
   gather(key = "variable", value = "value", -date)
 
-#as.POSIXlt(created_at)
-#validation_new1_s1_graph
 
 ggplot(validation_s2_new1_graph, aes(x = date, y = value)) + 
   geom_line(aes(color = variable, linetype = variable)) + 

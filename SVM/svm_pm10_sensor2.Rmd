@@ -1,7 +1,7 @@
 ---
 title: "SVR PM10 sensor 2 - 10th"
 author: "Marina Paldauf"
-date: "12/10/2020"
+date: "05/05/2021"
 output:
   html_document:
     toc: yes
@@ -54,16 +54,13 @@ d.mrakova.main.predict <- d.mrakova.main %>%
   mutate(date = as.POSIXct(created_at, "%Y-%m-%d %H:%M:%S")) %>%
   filter(date <= as.POSIXct("2020-12-31 23:59:59") & date >= as.POSIXct("2020-08-15 00:00:00"))
 
-nrow(d.mrakova.main.predict)
-head(d.mrakova.main.predict)
-#write.csv(d.mrakova.main,'sensor_data_2020.csv')
 
 ```
 
 
 # Cleaning data
 
-Keeping only needed variables and creating a variable to handle time variable. Removing two extreme outliers (pressure variable) immediately.
+Keeping only needed variables and creating a variable to handle time variable and removing two extreme pressure outliers due to sensor faultiness.
 
 ```{r cleaning}
 
@@ -238,17 +235,12 @@ PM10_2_standardized <-
   mutate(T = scale(T))%>%
   mutate(RH = scale(RH)) %>%
   mutate(p = scale(p))
-  #mutate(ambient_light = scale(ambient_light))
 
 # PM10
 
 validation_index2 <- createDataPartition(PM10_2_standardized$PM10, p=0.60, list=FALSE)
 validation2 <- PM10_2_standardized[-validation_index2,]
 d.mrakova.sensor2.selectedPM10 <- PM10_2_standardized[validation_index2,]
-
-#dim(d.mrakova.sensor2.selectedPM10)
-
-#levels(d.mrakova.sensor2.selectedPM10$PM10)
 
 summary(d.mrakova.sensor2.selectedPM10)
 
@@ -262,9 +254,6 @@ summary(d.mrakova.sensor2.selectedPM10)
 Training and prediction.
 
 ```{r svmBasic}
-
-#Scatter Plot
-#plot(d.mrakova.sensor2.selectedPM10)
 
 # regression training model SVM
 model2 <- svm(PM10~T + RH + CO2 + p + ambient_light+ VOC_index, data = d.mrakova.sensor2.selectedPM10)
@@ -287,8 +276,6 @@ validation_s2_new1_graph <- validation_s2_new1 %>%
    mutate(date = as.POSIXct(created_at), format="%Y-%m-%d %H:%M:%S") %>% select(date, pred_PM10_s2, PM10) %>%
   gather(key = "variable", value = "value", -date)
 
-#as.POSIXlt(created_at)
-#validation_new1_s1_graph
 
 ggplot(validation_s2_new1_graph, aes(x = date, y = value)) + 
   geom_line(aes(color = variable, linetype = variable)) + 

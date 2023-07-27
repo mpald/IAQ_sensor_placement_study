@@ -1,7 +1,7 @@
 ---
 title: "SVR CO2 sensor 1 - 10th"
 author: "Marina Paldauf"
-date: "12/10/2020"
+date:  "05/05/2021"
 output:
   html_document:
     toc: yes
@@ -50,22 +50,17 @@ Importing data set.
 ```{r data, warning=FALSE}
 
 d.mrakova.main <- read.csv("sensor_data_2020.csv")
-nrow(d.mrakova.main)
 
 d.mrakova.main.predict <- d.mrakova.main %>% 
   mutate(date = as.POSIXct(created_at, "%Y-%m-%d %H:%M:%S")) %>%
   filter(date <= as.POSIXct("2020-12-31 23:59:59") & date >= as.POSIXct("2020-08-15 00:00:00"))
-
-nrow(d.mrakova.main.predict)
-head(d.mrakova.main.predict)
-#write.csv(d.mrakova.main,'sensor_data_2020.csv')
 
 ```
 
 
 # Cleaning data
 
-Keeping only needed variables and creating a variable to handle time variable. 
+Keeping only needed variables and creating a variable to handle time variable and removing two extreme pressure outliers due to sensor faultiness.
 
 ```{r cleaning, echo=FALSE, warning=FALSE}
 
@@ -247,24 +242,18 @@ validation_index <- createDataPartition(CO2_1_standardized$CO2, p=0.60, list=FAL
 validation <- CO2_1_standardized[-validation_index,]
 d.mrakova.sensor1.selectedCO2 <- CO2_1_standardized[validation_index,]
 
-#dim(d.mrakova.sensor1.selectedCO2)
-
-#levels(d.mrakova.sensor1.selectedCO2$CO2)
 
 summary(d.mrakova.sensor1.selectedCO2)
 
 ```
 
-## Support vector regression
+## Support vector regression model
 
-### Fit SVR model and visualize using scatter plot
+### Fit SVM and visualize using scatter plot
 
 Training and prediction.
 
 ```{r SVRbasic}
-
-#Scatter Plot
-#plot(d.mrakova.sensor1.selectedCO2)
 
 # regression training model SVM
 model <- svm(CO2~T + RH + PM10 + p + ambient_light+ VOC_index, data = d.mrakova.sensor1.selectedCO2)
@@ -286,8 +275,6 @@ Overlay SVM Predictions on Scatter Plot
 validation_new1_s1_graph <- validation_new1_s1 %>%
    mutate(date = as.POSIXct(created_at), format="%Y-%m-%d %H:%M:%S") %>% select(date, pred_CO2_s1, CO2) %>%
   gather(key = "variable", value = "value", -date)
-
-#as.POSIXlt(created_at)
 
 ggplot(validation_new1_s1_graph, aes(x = date, y = value)) + 
   geom_line(aes(color = variable, linetype = variable)) + 
