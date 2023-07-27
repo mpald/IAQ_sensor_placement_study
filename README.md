@@ -1,6 +1,6 @@
 # IAQ_sensor_placement_study
 
-#Description
+# Description
 This repository represents the substitution for the study A Practical Study on the Impact of Sensor Location and Data Analysis Methodologies for Indoor Air Quality Assessment. 
 It contains the R code for the analysis used and discussed in the article, including data cleaning, glossary, general overview and statistics, correlation analysis, heat-map analysis, PCA and and SVM analysis.
 
